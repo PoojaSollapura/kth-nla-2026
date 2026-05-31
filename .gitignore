@@ -1,0 +1,28 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Data & checkpoints (track these via instructions, not raw bytes)
+data/raw/
+data/activations/
+checkpoints/
+*.pt
+*.bin
+*.safetensors
+
+# Logs & outputs
+runs/
+logs/
+wandb/
+outputs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
