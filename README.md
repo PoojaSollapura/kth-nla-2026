@@ -174,14 +174,10 @@ AV training (notebook 03) shows train loss falling 6.5 → 4.1 over 4 epochs whi
 
 ## 6 — Limitations
 
-- **No GRPO / joint RL.** Biggest one. The two-stage supervised approximation provides a useful lower bound but cannot match what jointly co-adapting AV and AR delivers. Estimated cost on pooled FVE: ≈ 0.11.
-- **No frontier-model warm-start.** The paper bootstraps AV with Claude-written summaries that reach FVE ~0.3–0.4 before RL begins. I used truncated source text as a proxy. A defensible alternative within the open-source regime would be to use a stronger open LLM (e.g. Llama-3-8B) as the summarizer.
-- **One model size.** Pythia siblings (70M, 410M, 1B) would let me plot FVE vs. parameter count and tell a scaling story. Time did not permit.
-- **One layer.** Only layer 6 was probed. Whether activations at deeper layers (e.g. 9) reconstruct better or worse is open.
-- **No outlier-feature mitigation.** Given how clearly the failures cluster at high ‖h‖, an obvious next experiment is to handle outlier activations separately — for example, normalize and condition AR on a magnitude scalar. This is a few hours of work and is the natural next step.
-- **Sampling, not optimized.** I generate AV outputs at temperature 1.0 with top-k 50. A small generation-time sweep on temperature and top-k might recover some FVE cheaply.
-
-None of these are required for the method to work; they are honest annotations of what this project does not cover.
+- **No GRPO / joint RL.** Biggest one. The two-stage supervised approximation cannot match what jointly co-adapting AV and AR delivers. Estimated cost on pooled FVE: ≈ 0.11.
+- **No frontier-model warm-start.** The paper bootstraps AV with Claude-written summaries. I used truncated source text as a proxy; a stronger open LLM (e.g. Llama-3-8B) as summarizer would be a defensible alternative.
+- **One model size, one layer.** Pythia siblings (70M, 410M, 1B) would enable a scaling plot; deeper layers (e.g. 9) might reconstruct differently. Neither was probed.
+- **No outlier-feature mitigation.** Given how clearly failures cluster at high ‖h‖, conditioning AR on a magnitude scalar is the obvious next step.
 
 ---
 
@@ -195,6 +191,17 @@ All notebooks run on free-tier Google Colab with a T4 GPU. Total wall-clock from
 4. Checkpoints, activation tensors, and figures persist on Drive between sessions.
 
 All randomness is seeded with `SEED = 0`. Activations, checkpoints, and large binary artifacts are excluded from the repo via [`.gitignore`](.gitignore); they regenerate from the notebooks.
+
+---
+
+## References
+
+1. Anthropic (2026). *Natural Language Autoencoders Produce Unsupervised Explanations of LLM Activations.* [transformer-circuits.pub/2026/nla](https://transformer-circuits.pub/2026/nla/index.html)
+2. Biderman, S. et al. (2023). *Pythia: A Suite for Analyzing LLMs Across Training and Scaling.* [arXiv:2304.01373](https://arxiv.org/abs/2304.01373)
+3. Merity, S. et al. (2016). *Pointer Sentinel Mixture Models* (WikiText-2). [arXiv:1609.07843](https://arxiv.org/abs/1609.07843)
+4. Dettmers, T. et al. (2022). *LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale.* [arXiv:2208.07339](https://arxiv.org/abs/2208.07339)
+5. Bondarenko, Y., Nagel, M., Blankevoort, T. (2023). *Quantizable Transformers: Removing Outliers by Helping Attention Heads Do Nothing.* [arXiv:2306.12929](https://arxiv.org/abs/2306.12929)
+6. KTH ASSERT (2026). Issue [#3 on phd-recruitment-2026-ai4code](https://github.com/ASSERT-KTH/phd-recruitment-2026-ai4code/issues/3) — clarification on FVE normalization.
 
 ---
 
