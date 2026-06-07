@@ -2,7 +2,11 @@
 
 A reimplementation and small-scale evaluation of the methodology from Anthropic's [*Natural Language Autoencoders Produce Unsupervised Explanations of LLM Activations*](https://transformer-circuits.pub/2026/nla/index.html), applied to **Pythia-160M**. Submitted as the KTH PhD recruitment task for Prof. Martin Monperrus (ASSERT-KTH, May–June 2026).
 
-> **TL;DR.** I built the verbalizer–reconstructor pair on layer 6 of Pythia-160M and trained the verbalizer with supervised next-token prediction (instead of the paper's GRPO RL). On 500 held-out test activations, **median FVE = +0.74** and **99.2 % of samples are reconstructed with FVE > 0** — the method works on Pythia at this small scale. But the *mean* FVE is **-0.16**, dragged down by roughly four catastrophic-failure outliers with very high activation norm (‖h‖ ≈ 350 vs. typical ≈ 25). Those outliers are consistent with the well-documented "outlier features" phenomenon in transformer residual streams. **The headline finding is that median/quantile FVE tells the real story; the mean FVE alone is misleading.**
+> **TL;DR.** I built the verbalizer–reconstructor pair on layer 6 of Pythia-160M, trained the verbalizer with supervised next-token prediction (instead of the paper's GRPO RL), and evaluated on 500 held-out test activations. Three findings:
+>
+> 1. **Median FVE = +0.74**, 99.2 % of samples reconstruct with FVE > 0 — *the mechanical pipeline works on Pythia at this scale.*
+> 2. **Mean FVE = -0.16**, dragged by ~4 high-norm outlier activations (‖h‖ ≈ 350 vs. typical 25) where FVE collapses to -50…-130. Cosine on these outliers stays at 0.4–0.8 — direction is right, magnitude is catastrophically wrong. This is consistent with the documented "outlier features" phenomenon in transformer residuals.
+> 3. **The AV's high-FVE descriptions are not actually topical** — they are generic WikiText-style hallucinations that AR can decode into typical-magnitude activations. Without joint RL, supervised AV training optimizes for stylistic plausibility, not faithfulness. The bottleneck is not yet doing its scientific job.
 
 ---
 
@@ -107,11 +111,44 @@ The per-sample scatter of FVE against ‖h‖ (figure [`figures/05_fve_vs_length
 
 This is consistent with the **"outlier features" phenomenon** documented in residual streams of transformer LLMs (e.g. *Dettmers et al., LLM.int8(), 2022*; *Bondarenko et al., 2023*): a tiny fraction of activations are massively larger than the rest, dominated by a few hidden dimensions on specific (often punctuation or beginning-of-text) tokens. They are known to break quantization, low-rank approximation, and other compression schemes that work on the typical population. **My result is that the NLA's natural-language bottleneck is another such scheme that handles the typical population well and fails catastrophically on outlier-norm activations.** I think this is the most interesting finding in the project.
 
-### 4.4 Cosine is decoupled from FVE on outliers
+### 4.4 What the AV descriptions actually say (and why high FVE here is *not* what it looks like)
 
-Looking at the per-sample cosine-vs-FVE scatter (figure [`figures/05_fve_distribution.png`](figures/05_fve_distribution.png), right panel): the catastrophic-FVE outliers actually have *relatively high* cosine (≈ 0.7–0.8). They are pointing in the right direction. Their MSE explodes because their magnitudes are 10× larger than what AR has learned to produce. This is the "direction-easy, magnitude-hard" story that was already visible in pooled cosines (≈ 0.62 across all three pipelines) but only becomes diagnostic at the per-sample level.
+Pulling the highest-FVE and lowest-FVE test examples is sobering. Five of each, in the format `(snippet → AV description, FVE, cos)`:
 
-For practical use this matters: a downstream consumer that only cares about *direction* of the residual (e.g. for activation steering) would see nearly all 500 samples as well-explained by the AV description. A consumer that needs faithful reconstruction is bottlenecked by the outlier minority.
+**Top reconstructions** (highest FVE on the test set):
+
+| Source snippet (first ~80 chars) | AV description | FVE | cos |
+|---|---|---:|---:|
+| `The song was included on the standard version of It Won't Be Soon Before Long...` | `During the early 1990s, Braathens became increasingly located to hear that the` | +0.86 | +0.80 |
+| `The 130th Engineer Brigade Headquarters and Headquarters Company (HHC), and one of the` | `In the early 1990s and 1930s, the surrender of the surrender of the` | +0.86 | +0.80 |
+| `A westward moving tropical depression developed in the southwestern Caribbean Sea...` | `As the 2004 Tour, the Grand Slam Tour chart at number 10 for the` | +0.86 | +0.76 |
+| `Today, Omaha is well connected to the Interstate Highway System...` | `In the 1920s, the first Independent Flying Base WAFE moved to M` | +0.86 | +0.79 |
+
+**Bottom reconstructions** (lowest FVE):
+
+| Source snippet | AV description | FVE | cos |
+|---|---|---:|---:|
+| `In May 1940 it was reported that the area's headquarters building would change...` | `the phosphate fertilizers fertilizers (fertilizers) confer the fertilizers fertil...` | +0.28 | +0.14 |
+| `The first spacecraft to explore Jupiter was Pioneer 10...` | `By the song broke into number 2 million, producing mixed reviews from APW.` | **-49.0** | +0.42 |
+| `The clinical manifestations of Chagas disease are due to cell death...` | `Roxas Roxa is a chemical element with the fibarasaurus` | **-128.2** | +0.76 |
+| `Florida Atlantic began its expansion beyond a one campus university in 1971...` | `The corridor of Languedek Warn's history was at a period known` | **-128.7** | +0.74 |
+| `Persian agents or Palmyrene traitors: the possibility of a Persian involvement exists...` | `Following the defeat of his surrender, many SAFE was later released by the` | **-132.9** | +0.79 |
+
+Two things are obvious from this table that the numeric summaries do not show:
+
+**(a) The AV is not topically describing the activation.** Even the best-FVE descriptions are *off-topic*. The snippet about a song becomes a description about Braathens (a Norwegian airline); the snippet about a tropical storm becomes a description about the "2004 Tour Grand Slam"; the snippet about a Chagas-disease activation produces a fabricated phrase, "Roxas Roxa is a chemical element with the fibarasaurus." The AV has not learned *what `h` is about*; it has learned to *write text in the general style and topical distribution of WikiText-2*. AR can then reconstruct a typical-magnitude activation from any such wiki-style text, and on most samples that "typical-magnitude" reconstruction happens to be close enough to the original `h` to score high FVE. **The bottleneck is not yet doing its scientific job.** That is, in my view, the most important honest qualification on the +0.74 median result.
+
+**(b) On the catastrophic outliers, cosine stays high (0.4–0.8) while FVE collapses.** Direction is right; magnitude is off by an order of magnitude. AR has learned a calibrated "typical-magnitude" prediction and cannot produce vectors at the outlier scale. This is the direction-easy, magnitude-hard story made concrete at the per-sample level.
+
+### 4.5 Implication
+
+What this project actually demonstrates on Pythia-160M:
+
+1. **The mechanical pipeline works** — activations can be round-tripped through a text bottleneck with median FVE +0.74 on 99 % of samples, using only supervised training.
+2. **But the verbalizer is not yet "verbalizing" in the paper's sense.** Without joint RL pressure, it converges on generic wiki-text style; high FVE comes from style-matching, not topical fidelity. A user reading the AV description would not learn what the activation is "about."
+3. **A small subset of high-norm activations breaks the pipeline catastrophically.** This is consistent with the outlier-features phenomenon documented in the LLM-quantization literature.
+
+These three together feel like a more honest picture than any single FVE number could give.
 
 ---
 
@@ -123,9 +160,13 @@ When I first plotted L2 norms in notebook 01, the histogram looked bimodal and I
 
 ### 5.2 Pooled FVE alone would have been misleading
 
-If I had stopped at notebook 04's pooled FVE of -0.16 and not looked at the distribution, I would have written this up as "the simplified pipeline does not beat a placeholder baseline on Pythia." That is technically true and quantitatively defensible, but it misses the actual structure. **My honest reaction to the per-sample plot was that the headline metric in the paper is potentially fragile in the presence of activation outliers, and that future small-model NLA work should report median FVE or fraction-positive alongside mean.** This is not a finding the paper foregrounds, presumably because Claude's residuals are larger-dim and may have different outlier statistics; on a 160M model it dominates.
+If I had stopped at notebook 04's pooled FVE of -0.16 and not looked at the distribution, I would have written this up as "the simplified pipeline does not beat a placeholder baseline on Pythia." That is technically true and quantitatively defensible, but it misses the actual structure. My reaction to the per-sample plot was that the headline metric in the paper is potentially fragile under activation-outlier conditions, and that small-model NLA work should report median FVE or fraction-positive alongside mean. This is not a framing the paper foregrounds, presumably because Claude's residuals have different outlier statistics; on a 160M model it dominates.
 
-### 5.3 The supervised AV's train/val gap
+### 5.3 Examining the qualitative outputs changed my interpretation more than the numbers did
+
+The single biggest update came from reading the top-5 examples in Section 4.4. The FVE numbers alone made the pipeline look like it was working. The descriptions revealed that AV had learned a *style*, not a *semantics* — it produces plausible WikiText-flavored prose that is topically unrelated to the source activation, yet AR can still decode such text into typical-magnitude activations and score high FVE. This is a kind of metric overfitting at the system level: AV and AR are jointly satisfying the FVE metric by both leaning on the same statistical prior over wiki text, without the bottleneck carrying real information. I think this would be a useful caution to surface in any small-model NLA reimplementation.
+
+### 5.4 The supervised AV's train/val gap
 
 AV training (notebook 03) shows train loss falling 6.5 → 4.1 over 4 epochs while val loss plateaued near 5.7. Mild overfitting on 4000 training pairs. Combined with greedy/sampled generation, the test-time descriptions are noisier than the teacher-forced training signal. The paper's reward-driven training presumably tightens this; staged supervised training does not.
 
